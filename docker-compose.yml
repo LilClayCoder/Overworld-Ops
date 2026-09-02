@@ -1,0 +1,56 @@
+# Local development stack.
+#
+# The API talks to the Docker Engine through the mounted socket and creates the
+# Minecraft containers as SIBLINGS of these services, directly on the host.
+# They are therefore not listed here and are not torn down by `compose down`.
+
+services:
+  api:
+    build: ./backend
+    ports:
+      - "8080:8080"
+      # The Minecraft port pool must be published by this service, because
+      # game containers bind ports on the host, not inside this container.
+      # Widen this range if you raise OWO_PORT_RANGE_END.
+      - "25565-25575:25565-25575"
+    environment:
+      OWO_HTTP_ADDR: ":8080"
+      OWO_DATABASE_URL: "/app/data/overworld.db"
+      OWO_MINECRAFT_IMAGE: "itzg/minecraft-server:latest"
+      OWO_PORT_RANGE_START: "25565"
+      OWO_PORT_RANGE_END: "25575"
+      OWO_MAX_SERVERS: "10"
+      OWO_DEFAULT_MEMORY: "2G"
+      OWO_DEFAULT_CPU_LIMIT: "2"
+      # This process runs in its own network namespace, so a local bind test
+      # would say nothing about whether the host port is free.
+      OWO_PROBE_HOST_PORTS: "false"
+      OWO_PUBLIC_HOSTNAME: "${OWO_PUBLIC_HOSTNAME:-localhost}"
+      OWO_SESSION_SECRET: "${OWO_SESSION_SECRET:?set a random value in .env}"
+      OWO_ALLOW_REGISTRATION: "${OWO_ALLOW_REGISTRATION:-true}"
+      OWO_CURSEFORGE_API_KEY: "${OWO_CURSEFORGE_API_KEY:-}"
+      # The web service calls the API server-side over the compose network.
+      OWO_CORS_ORIGIN: ""
+    volumes:
+      # Access to the Engine API. This is effectively root on the host, which
+      # is why this stack belongs on a machine you control.
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Registry database.
+      - api-data:/app/data
+    restart: unless-stopped
+
+  web:
+    build: ./frontend
+    ports:
+      - "3000:3000"
+    environment:
+      # adapter-node serves the built app; requests to /api are proxied by
+      # whatever sits in front in production. For dev, prefer `npm run dev`
+      # in ./frontend, which proxies /api to the API via vite.config.ts.
+      NODE_ENV: production
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  api-data:
