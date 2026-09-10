@@ -423,8 +423,8 @@ Fine at current scale, and worth revisiting if this ever leaves the homelab.
   actually changed.
 - Disk usage per world is unbounded. A quota, or at least a dashboard warning,
   would stop one server filling the host.
-- An admin UI for user management — currently the only way to remove a user is
-  by hand in SQLite.
+- Self-service password change. An admin can reset anybody's password from the
+  admin panel, but a user cannot yet change their own.
 
 ---
 

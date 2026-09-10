@@ -19,6 +19,11 @@ export interface User {
 	createdAt: string;
 }
 
+/** A user as the admin panel sees them: the account plus what it owns. */
+export interface AdminUser extends User {
+	serverCount: number;
+}
+
 export interface MinecraftServer {
 	id: string;
 	name: string;
@@ -101,6 +106,39 @@ export const api = {
 		}),
 
 	logout: () => request<void>('/auth/logout', { method: 'POST' }),
+
+	// --- admin ---
+	// Server management for admins goes through the endpoints above: the API
+	// already lets an admin act on anybody's server, so there is no parallel
+	// set of admin server calls.
+
+	adminUsers: () => request<AdminUser[]>('/admin/users'),
+
+	adminCreateUser: (username: string, password: string, isAdmin = false) =>
+		request<AdminUser>('/admin/users', {
+			method: 'POST',
+			body: JSON.stringify({ username, password, isAdmin })
+		}),
+
+	adminSetUserAdmin: (id: string, isAdmin: boolean) =>
+		request<AdminUser>(`/admin/users/${id}`, {
+			method: 'PATCH',
+			body: JSON.stringify({ isAdmin })
+		}),
+
+	adminSetUserPassword: (id: string, password: string) =>
+		request<AdminUser>(`/admin/users/${id}`, {
+			method: 'PATCH',
+			body: JSON.stringify({ password })
+		}),
+
+	/**
+	 * Delete an account. The API refuses while the user still owns servers
+	 * unless reassign is true, which transfers them to the calling admin —
+	 * deleting outright would strand their containers and volumes.
+	 */
+	adminDeleteUser: (id: string, reassign = false) =>
+		request<void>(`/admin/users/${id}?reassign=${reassign}`, { method: 'DELETE' }),
 
 	// --- servers ---
 	listServers: () => request<MinecraftServer[]>('/servers'),

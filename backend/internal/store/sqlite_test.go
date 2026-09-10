@@ -269,3 +269,142 @@ func TestCreateServerInputValidate(t *testing.T) {
 		})
 	}
 }
+
+func TestListUsersAndAdminCount(t *testing.T) {
+	ctx := context.Background()
+	st := newTestStore(t)
+
+	if n, err := st.CountAdmins(ctx); err != nil || n != 0 {
+		t.Fatalf("CountAdmins on empty db = %v, %v; want 0, nil", n, err)
+	}
+
+	steve := newTestUser(t, st, "steve")
+	newTestUser(t, st, "alex")
+
+	users, err := st.ListUsers(ctx)
+	if err != nil {
+		t.Fatalf("ListUsers: %v", err)
+	}
+	if len(users) != 2 {
+		t.Fatalf("ListUsers returned %d users, want 2", len(users))
+	}
+	// Oldest first, which is the order the admin panel renders.
+	if users[0].Username != "steve" || users[1].Username != "alex" {
+		t.Errorf("order = %q, %q; want steve, alex", users[0].Username, users[1].Username)
+	}
+
+	if err := st.SetUserAdmin(ctx, steve.ID, true); err != nil {
+		t.Fatalf("SetUserAdmin: %v", err)
+	}
+	if n, err := st.CountAdmins(ctx); err != nil || n != 1 {
+		t.Fatalf("CountAdmins after promote = %v, %v; want 1, nil", n, err)
+	}
+
+	fetched, err := st.UserByID(ctx, steve.ID)
+	if err != nil {
+		t.Fatalf("UserByID: %v", err)
+	}
+	if !fetched.IsAdmin {
+		t.Error("IsAdmin = false after promote, want true")
+	}
+
+	if err := st.SetUserAdmin(ctx, "no-such-user", true); !errors.Is(err, ErrNotFound) {
+		t.Errorf("SetUserAdmin on missing user = %v, want ErrNotFound", err)
+	}
+}
+
+func TestSetUserPassword(t *testing.T) {
+	ctx := context.Background()
+	st := newTestStore(t)
+	steve := newTestUser(t, st, "steve")
+
+	if err := st.SetUserPassword(ctx, steve.ID, "new-hash"); err != nil {
+		t.Fatalf("SetUserPassword: %v", err)
+	}
+
+	fetched, err := st.UserByID(ctx, steve.ID)
+	if err != nil {
+		t.Fatalf("UserByID: %v", err)
+	}
+	if fetched.PasswordHash != "new-hash" {
+		t.Errorf("hash = %q, want %q", fetched.PasswordHash, "new-hash")
+	}
+
+	if err := st.SetUserPassword(ctx, "no-such-user", "x"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("SetUserPassword on missing user = %v, want ErrNotFound", err)
+	}
+}
+
+func TestServerCountsByOwnerAndReassign(t *testing.T) {
+	ctx := context.Background()
+	st := newTestStore(t)
+	steve := newTestUser(t, st, "steve")
+	alex := newTestUser(t, st, "alex")
+
+	for i, port := range []int{25565, 25566} {
+		srv := &Server{
+			Name: "world", OwnerID: steve.ID, Type: TypeVanilla, Version: "LATEST",
+			Port: port, Memory: "2G", Status: StatusStopped,
+		}
+		if err := st.CreateServer(ctx, srv); err != nil {
+			t.Fatalf("create server %d: %v", i, err)
+		}
+	}
+
+	counts, err := st.ServerCountsByOwner(ctx)
+	if err != nil {
+		t.Fatalf("ServerCountsByOwner: %v", err)
+	}
+	if counts[steve.ID] != 2 {
+		t.Errorf("steve count = %d, want 2", counts[steve.ID])
+	}
+	// An owner with nothing is simply absent from the map.
+	if counts[alex.ID] != 0 {
+		t.Errorf("alex count = %d, want 0", counts[alex.ID])
+	}
+
+	moved, err := st.ReassignServers(ctx, steve.ID, alex.ID)
+	if err != nil {
+		t.Fatalf("ReassignServers: %v", err)
+	}
+	if moved != 2 {
+		t.Errorf("moved = %d, want 2", moved)
+	}
+
+	counts, err = st.ServerCountsByOwner(ctx)
+	if err != nil {
+		t.Fatalf("ServerCountsByOwner after reassign: %v", err)
+	}
+	if counts[steve.ID] != 0 || counts[alex.ID] != 2 {
+		t.Errorf("counts after reassign = steve %d, alex %d; want 0, 2",
+			counts[steve.ID], counts[alex.ID])
+	}
+}
+
+// Deleting an owner cascades to their servers. The admin API relies on this
+// being true to justify refusing the delete until the servers are dealt with,
+// so pin the behaviour here.
+func TestDeleteUserCascadesToServers(t *testing.T) {
+	ctx := context.Background()
+	st := newTestStore(t)
+	steve := newTestUser(t, st, "steve")
+
+	srv := &Server{
+		Name: "world", OwnerID: steve.ID, Type: TypeVanilla, Version: "LATEST",
+		Port: 25565, Memory: "2G", Status: StatusStopped,
+	}
+	if err := st.CreateServer(ctx, srv); err != nil {
+		t.Fatalf("create server: %v", err)
+	}
+
+	if err := st.DeleteUser(ctx, steve.ID); err != nil {
+		t.Fatalf("DeleteUser: %v", err)
+	}
+
+	if _, err := st.ServerByID(ctx, srv.ID); !errors.Is(err, ErrNotFound) {
+		t.Errorf("server after owner delete = %v, want ErrNotFound", err)
+	}
+	if err := st.DeleteUser(ctx, steve.ID); !errors.Is(err, ErrNotFound) {
+		t.Errorf("second DeleteUser = %v, want ErrNotFound", err)
+	}
+}

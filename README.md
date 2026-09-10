@@ -1,3 +1,9 @@
+8. Admin panel — accounts (create, promote, demote, reset password, delete
+   with server reassignment) and every server on the box, at `/admin`
+| `GET` | `/api/admin/users` | List accounts with server counts (admin only) |
+| `POST` | `/api/admin/users` | Create an account without logging yourself out (admin only) |
+| `PATCH` | `/api/admin/users/{id}` | Promote, demote, or reset a password (admin only) |
+| `DELETE` | `/api/admin/users/{id}` | Delete an account; `?reassign=true` moves their servers to you first (admin only) |
 # Overworld Ops
 
 Self-service Minecraft server deployment for a homelab. Friends log in, pick a
@@ -85,7 +91,8 @@ scripts/run.sh
 
 That runs the Go API on `:8080` and the Vite dev server on `:5173`, interleaves
 their logs, and stops both on Ctrl-C. Open http://localhost:5173 — the first
-account to register becomes the admin.
+account to register becomes the admin. Admins get an **Admin** tab for managing
+accounts and every server on the box.
 
 The API runs on the host rather than in a container on purpose: the port
 allocator's bind test only means anything in the Docker host's own network
@@ -179,6 +186,10 @@ endpoints requires a session cookie.
 | `POST` | `/api/servers/{id}/start` | Start the container |
 | `POST` | `/api/servers/{id}/stop` | Stop it, with a grace period to save |
 | `GET` | `/api/servers/{id}/logs` | SSE console stream (`?tail=200`) |
+| `GET` | `/api/admin/users` | List accounts with server counts (admin only) |
+| `POST` | `/api/admin/users` | Create an account without logging yourself out (admin only) |
+| `PATCH` | `/api/admin/users/{id}` | Promote, demote, or reset a password (admin only) |
+| `DELETE` | `/api/admin/users/{id}` | Delete an account; `?reassign=true` moves their servers to you first (admin only) |
 
 ### Auth model
 
@@ -205,6 +216,8 @@ simple. The trade-offs, stated plainly:
 6. Modpack support — Modrinth and CurseForge IDs pass through to itzg
 7. Resource governance — *partial*: per-container CPU and memory caps and a
    max-server cap are enforced
+8. Admin panel at `/admin` — accounts (create, promote, demote, reset password,
+   delete with server reassignment) and every server on the box
 
 **Not built yet**, in priority order — see
 [FUTURE_DEVELOPMENT.md](FUTURE_DEVELOPMENT.md) for the detail and the reasoning:

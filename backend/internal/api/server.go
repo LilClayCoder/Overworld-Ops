@@ -53,6 +53,14 @@ func (s *Server) Routes() http.Handler {
 	// for now, and EventSource reconnects on its own.
 	mux.HandleFunc("GET /api/servers/{id}/logs", s.requireAuth(s.handleServerLogs))
 
+	// Admin: account management. There is deliberately no admin server API —
+	// ownsServer already lets an admin drive every endpoint above against
+	// anybody's server, so the panel reuses those.
+	mux.HandleFunc("GET /api/admin/users", s.requireAdmin(s.handleListUsers))
+	mux.HandleFunc("POST /api/admin/users", s.requireAdmin(s.handleCreateUser))
+	mux.HandleFunc("PATCH /api/admin/users/{id}", s.requireAdmin(s.handleUpdateUser))
+	mux.HandleFunc("DELETE /api/admin/users/{id}", s.requireAdmin(s.handleDeleteUser))
+
 	return s.withCORS(s.withLogging(mux))
 }
 

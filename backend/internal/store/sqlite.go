@@ -148,6 +148,116 @@ func scanUser(row *sql.Row) (*User, error) {
 	return &u, nil
 }
 
+// ListUsers returns every account, oldest first, which is the order the admin
+// panel renders them in.
+func (s *Store) ListUsers(ctx context.Context) ([]*User, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, username, password_hash, is_admin, created_at FROM users ORDER BY created_at`)
+	if err != nil {
+		return nil, fmt.Errorf("query users: %w", err)
+	}
+	defer rows.Close()
+
+	users := []*User{}
+	for rows.Next() {
+		var u User
+		if err := rows.Scan(&u.ID, &u.Username, &u.PasswordHash, &u.IsAdmin, &u.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scan user: %w", err)
+		}
+		users = append(users, &u)
+	}
+	return users, rows.Err()
+}
+
+// CountAdmins reports how many accounts hold the admin flag. The admin API
+// checks it before a demotion or delete so the platform is never left with
+// nobody who can administer it.
+func (s *Store) CountAdmins(ctx context.Context) (int, error) {
+	var n int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM users WHERE is_admin = 1`).Scan(&n); err != nil {
+		return 0, fmt.Errorf("count admins: %w", err)
+	}
+	return n, nil
+}
+
+// SetUserAdmin grants or revokes admin rights.
+func (s *Store) SetUserAdmin(ctx context.Context, id string, isAdmin bool) error {
+	res, err := s.db.ExecContext(ctx, `UPDATE users SET is_admin = ? WHERE id = ?`, isAdmin, id)
+	if err != nil {
+		return fmt.Errorf("set user admin: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// SetUserPassword replaces the stored hash. The caller supplies an
+// already-hashed password, as with CreateUser.
+func (s *Store) SetUserPassword(ctx context.Context, id, passwordHash string) error {
+	res, err := s.db.ExecContext(ctx, `UPDATE users SET password_hash = ? WHERE id = ?`, passwordHash, id)
+	if err != nil {
+		return fmt.Errorf("set user password: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// DeleteUser removes an account.
+//
+// servers.owner_id declares ON DELETE CASCADE, so deleting a user who still
+// owns servers would drop those records and strand their containers and
+// volumes on the host with nothing left to reference them. The caller is
+// responsible for reassigning or deleting the user's servers first; the admin
+// API refuses the request otherwise.
+func (s *Store) DeleteUser(ctx context.Context, id string) error {
+	res, err := s.db.ExecContext(ctx, `DELETE FROM users WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("delete user: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// ReassignServers transfers every server owned by from to to, returning how
+// many changed hands. It is how an admin removes an account without touching
+// the worlds that account created.
+func (s *Store) ReassignServers(ctx context.Context, from, to string) (int, error) {
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE servers SET owner_id = ?, updated_at = ? WHERE owner_id = ?`,
+		to, time.Now().UTC(), from)
+	if err != nil {
+		return 0, fmt.Errorf("reassign servers: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	return int(n), nil
+}
+
+// ServerCountsByOwner returns how many servers each owner has, so the admin
+// panel can show it without a query per row.
+func (s *Store) ServerCountsByOwner(ctx context.Context) (map[string]int, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT owner_id, COUNT(*) FROM servers GROUP BY owner_id`)
+	if err != nil {
+		return nil, fmt.Errorf("count servers by owner: %w", err)
+	}
+	defer rows.Close()
+
+	counts := map[string]int{}
+	for rows.Next() {
+		var owner string
+		var n int
+		if err := rows.Scan(&owner, &n); err != nil {
+			return nil, fmt.Errorf("scan server count: %w", err)
+		}
+		counts[owner] = n
+	}
+	return counts, rows.Err()
+}
+
 // --- servers ---
 
 const serverCols = `id, name, owner_id, type, version, modpack_provider, modpack_id,

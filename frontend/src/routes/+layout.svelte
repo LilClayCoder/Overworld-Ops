@@ -32,6 +32,7 @@
 			<nav>
 				<a href="/">Servers</a>
 				<a href="/new">New server</a>
+				{#if session.user.isAdmin}<a href="/admin">Admin</a>{/if}
 				<span class="muted">{session.user.username}</span>
 				<button onclick={handleLogout}>Log out</button>
 			</nav>

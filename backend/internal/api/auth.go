@@ -148,6 +148,23 @@ type credentials struct {
 	Password string `json:"password"`
 }
 
+// minPasswordLength is the floor for both self-registration and an
+// admin-set password, so the two paths cannot drift apart.
+const minPasswordLength = 8
+
+// validateCredentials normalises and checks a username/password pair. It
+// returns the message to show the user, or "" when the pair is acceptable.
+func validateCredentials(creds *credentials) string {
+	creds.Username = strings.TrimSpace(creds.Username)
+	if len(creds.Username) < 3 || len(creds.Username) > 32 {
+		return "username must be 3-32 characters"
+	}
+	if len(creds.Password) < minPasswordLength {
+		return fmt.Sprintf("password must be at least %d characters", minPasswordLength)
+	}
+	return ""
+}
+
 // handleRegister creates an account. Registration is open only while
 // OWO_ALLOW_REGISTRATION is true; otherwise an admin creates accounts.
 func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
@@ -162,13 +179,8 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	creds.Username = strings.TrimSpace(creds.Username)
-	if len(creds.Username) < 3 || len(creds.Username) > 32 {
-		writeError(w, http.StatusBadRequest, "username must be 3-32 characters")
-		return
-	}
-	if len(creds.Password) < 8 {
-		writeError(w, http.StatusBadRequest, "password must be at least 8 characters")
+	if msg := validateCredentials(&creds); msg != "" {
+		writeError(w, http.StatusBadRequest, msg)
 		return
 	}
 

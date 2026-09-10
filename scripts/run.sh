@@ -48,12 +48,41 @@ load_env() {
 	[ -f "$REPO_ROOT/.env" ] || return 0
 
 	info "loading .env"
-	# Export every KEY=VALUE line, ignoring comments and blanks. `set -a` marks
-	# assignments for export so the children inherit them.
-	set -a
-	# shellcheck disable=SC1091
-	. "$REPO_ROOT/.env"
-	set +a
+	# Parse KEY=VALUE literally rather than sourcing the file.
+	#
+	# Sourcing runs every value through the shell, so a secret containing $,
+	# backticks or quotes is silently rewritten before the API ever sees it —
+	# a password ending in `$#` gets expanded to the argument count, and the
+	# account is then seeded with a password nobody typed. It also made this
+	# script disagree with `docker compose`, which reads .env literally.
+	while IFS= read -r line || [ -n "$line" ]; do
+		# Tolerate CRLF, which is easy to end up with on Windows.
+		line=${line%$'\r'}
+
+		case "$line" in
+			'' | '#'*) continue ;;
+			*'='*) ;;
+			*) continue ;;
+		esac
+
+		key=${line%%=*}
+		value=${line#*=}
+
+		# Ignore anything that is not a plain variable name, so a stray line
+		# cannot define something unexpected.
+		key=$(printf '%s' "$key" | tr -d '[:space:]')
+		case "$key" in
+			'' | *[!A-Za-z0-9_]*) continue ;;
+		esac
+
+		# Strip one layer of matching quotes, the way compose does.
+		case "$value" in
+			\"*\") value=${value#\"}; value=${value%\"} ;;
+			\'*\') value=${value#\'}; value=${value%\'} ;;
+		esac
+
+		export "$key=$value"
+	done < "$REPO_ROOT/.env"
 }
 
 # preflight checks the things whose absence produces a confusing failure ten
